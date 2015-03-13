@@ -6,6 +6,8 @@ Ext.define('CustomApp', {
         {xtype: 'container', itemId: 'header_box', layout: {type:'hbox'}, items: [
               {xtype:'container',itemId:'control_box',layout:{type:'hbox'}},
               {xtype:'container',itemId:'button_box',layout:{type:'hbox'}},
+              {xtype:'container',itemId:'summary_box', padding: 10, tpl:'<tpl><font color="grey"><b><i>{message}</i></b></color></tpl>'},
+
          ]},
         {xtype:'container',itemId:'display_box'},
         {xtype:'tsinfolink'}
@@ -16,20 +18,7 @@ Ext.define('CustomApp', {
     lookbackFetchFields: ['_PreviousValues.Blocked','_SnapshotNumber','Name','FormattedID','_ProjectHierarchy','Feature','_TypeHierarchy','Blocked','_ValidFrom','_ValidTo','BlockedReason','c_BlockerOwnerFirstLast','c_BlockerCategory','c_BlockerCreationDate','DirectChildrenCount','Feature','Iteration'],
     featureHash: {},
     launch: function() {
-//    	this.down('#control_box').add({
-//    	    xtype: 'rallycombobox',
-//    	    itemId: 'cb-option',
-//    	    fieldLabel: 'Show Artifacts',
-//    	    labelAlign: 'right',
-//    	    width: 275,
-//    	    margin: 10,
-//    	    store: this.showOptionsStore,
-//    	    listeners: {
-//    	        scope: this,
-//    	        change: this._showDatePicker
-//    	    }
-//    	});
-
+        var defaultDate = Rally.util.DateTime.add(new Date(),"month",-3);
         this.down('#control_box').add({
             xtype: 'rallycheckboxfield',
             itemId: 'chk-blocked',
@@ -37,7 +26,10 @@ Ext.define('CustomApp', {
             labelAlign: 'right',
             labelWidth: 100,
             margin: 10,
-            value: true 
+            listeners: {
+                scope: this,
+                change: function() {this._filterBlocked();}
+            }
         });
 
         this.down('#control_box').add({
@@ -46,40 +38,27 @@ Ext.define('CustomApp', {
             fieldLabel: 'Items blocked on or after',
             labelAlign: 'right',
             labelWidth: 150,
+            value: defaultDate, 
             margin: 10,
          });
 
-    	this.down('#button_box').add({
-    		xtype: 'rallybutton',
-    		itemId: 'run-button',
-    		text: 'Run',
+         this.down('#button_box').add({
+            xtype: 'rallybutton',
+            itemId: 'run-button',
+            text: 'Run',
             margin: 10,
-    		scope:this,
-    		handler: this._run,
-    		//disabled: true
-    	});
-    	this.down('#button_box').add({
-    		xtype: 'rallybutton',
-    		itemId: 'export-button',
-    		text: 'Export',
-            margin: 10,
-    		scope: this,
-    		handler: this._exportData,
-    		//disabled: true
-    	});
-    },
-    _showDatePicker: function(cb){
-        if (cb.getValue() === true){
-            if(this._getFromDateControl()){
-                this._getFromDateControl().destroy();
-            }
-        } else {
-            this.down('#control_box').add({
-               xtype: 'rallydatefield',
-               itemId: 'from-date-picker',
-               margin: 10,
-            });
-        }
+            scope:this,
+            handler: this._run,
+        });
+
+         this.down('#button_box').add({
+             xtype: 'rallybutton',
+             itemId: 'export-button',
+             text: 'Export',
+             margin: 10,
+             scope: this,
+             handler: this._exportData,
+         });
     },
     _getFromDateControl: function(){
         return this.down('#from-date-picker');
@@ -93,27 +72,52 @@ Ext.define('CustomApp', {
         }
         return null;
     },
+    _filterBlocked: function(store){
+        var filterBlocked = this._showOnlyBlockedItems();
+        
+        if (store == undefined){
+            var grid = this._getGrid();  
+            if (grid == null){return;}
+            store = grid.getStore();
+        }
+        
+        if (filterBlocked === true){
+            store.filterBy(function(item){
+                return (item.get('Blocked') === true); 
+            });
+        } else {
+            store.clearFilter();
+        }
+        this._updateSummary(store.count());
+    },
+    _updateSummary: function(totalResults){
+        var blocked = '';
+        if (this._showOnlyBlockedItems()){
+            blocked = "blocked"
+        }
+        var msg = Ext.String.format("{0} {1} items found.",totalResults, blocked);
+        this.down('#summary_box').update({message: msg});
+    },
     _showOnlyBlockedItems: function(){
         if (this.down('#chk-blocked')){
+            this.logger.log('showOnlyBlockedItems ', this.down('#chk-blocked').getValue());
             return this.down('#chk-blocked').getValue();
         }
         return false;  
     },
     _run: function(){
-        
         var fromDate = this._getFromDate();
         if (isNaN(Date.parse(fromDate))){
             Rally.ui.notify.Notifier.showWarning({message: "No date selected.  Please select a date and try again."});
             return;
         }
-        
         var current_project_id  = this.getContext().getProject().ObjectID;
         
         this.setLoading(true);
-    	this._fetchLookbackStore(current_project_id, fromDate).then({
-    	    scope: this,
-    	    success: this._calculateAgingForBlockers
-    	});
+        this._fetchLookbackStore(current_project_id, fromDate).then({
+            scope: this,
+            success: this._calculateAgingForBlockers
+        });
     },
     _fetchLookbackStore: function(currentProjectId, fromDate){
         var deferred = Ext.create('Deft.Deferred');
@@ -125,7 +129,7 @@ Ext.define('CustomApp', {
         find["_TypeHierarchy"] = 'HierarchicalRequirement';
         find["_ProjectHierarchy"] = currentProjectId;  
         
-    	Ext.create('Rally.data.lookback.SnapshotStore', {
+        Ext.create('Rally.data.lookback.SnapshotStore', {
             scope: this,
             listeners: {
                 scope: this,
@@ -168,13 +172,12 @@ Ext.define('CustomApp', {
             },
        });    
        return deferred.promise;
-    
     },
     _renderGrid: function(data){
         var columns = [{text: 'FormattedID', dataIndex: 'FormattedID'},
                        {text: 'Name', dataIndex: 'Name', flex: 1},
-                       {text: 'Project', dataIndex: 'Project', renderer: this._objectNameRenderer},
-                       {text: 'Feature', dataIndex: 'Feature', renderer: this._featureOidRenderer},
+                       {text: 'Project', flex: 1, dataIndex: 'Project', renderer: this._objectNameRenderer},
+                   //    {text: 'Feature', dataIndex: 'Feature', renderer: this._featureOidRenderer},
                        {text: 'Blocked', dataIndex: 'Blocked'},
                        {text: 'Total Blocked Time (Days)', dataIndex: 'totalBlocked', renderer: this._decimalRenderer}];
             columns.push({text: 'Average Resolution Time (Days)', dataIndex: 'averageResolutionTime', renderer: this._decimalRenderer});
@@ -186,16 +189,34 @@ Ext.define('CustomApp', {
             this.down('#data-grid').destroy();
         }
         
+        var pageSize = data.length;  
         var grid = Ext.create('Rally.ui.grid.Grid', {
             itemId: 'data-grid',
             store: Ext.create('Rally.data.custom.Store', {
                 data: data,
-                autoLoad: true
+                autoLoad: true,
+                remoteSort: false,
+                remoteFilter: false,
+                pageSize: pageSize,
+                scroll: 'vertical',
+                listeners: {
+                    scope: this,
+                    load: function(store){
+                        this._filterBlocked(store);
+                    }
+                }
             }),
+            showPagingToolbar: false, 
             columnCfgs: columns
+            
         });
         this.down('#display_box').add(grid);
+        
         this.setLoading(false);
+        
+    },
+    _getGrid: function(){
+        return this.down('#data-grid');
     },
     _decimalRenderer: function(v,m,r){
         if (!isNaN(v)){
@@ -231,43 +252,22 @@ Ext.define('CustomApp', {
             this.logger.log(fieldObj,agingObj,mobilityObj);
             
             record["numDurations"] = agingObj.durations.length;
-            record["averageResolutionTime"] = '--';
             if (agingObj.durations.length > 0){
                 record["totalBlocked"] = Ext.Array.sum(agingObj.durations);
                 var mean_array = agingObj.durations;  
-                if (record["Blocked"]){
-                    //don't include the current block in the mean.
-                    mean_array = agingObj.durations.slice(0,-1);
-                } 
-                if (mean_array.length > 0){
-                    record["averageResolutionTime"] = Ext.Array.mean(mean_array);
-                }
-                
-                if (!this._showOnlyBlockedItems() || (this._showOnlyBlockedItems && record["Blocked"])){
-                    data.push(record); 
-                }
-                
+                record["averageResolutionTime"] = Ext.Array.mean(agingObj.durations);
+                data.push(record); 
             }
-            
         },this);
         this.logger.log('_calculateAgingForBlockers',data);
+        
         this._renderGrid(data);
     },
-
-    _exportData: function(data){
-     	var keys = Object.keys(data[0]);
-     	var text = keys.join(',') + '\n';
-    	Ext.each(data, function(d){
-     		Ext.each(keys, function(key){
-     			var val = d[key] || '';
-     			if (/\n|,|\t/.test(val)){
-           			text += Ext.String.format("\"{0}\",", val);
-     			} else {
-         			text += Ext.String.format("{0},", val);
-     			}
-     		});
-     		text += '\n';
-    	});
-    	Rally.technicalservices.FileUtilities.saveTextAsFile(text, 'data.csv');
+    _exportData: function(){
+        var filename = Ext.String.format('blockers-{0}.csv',Rally.util.DateTime.format(new Date(),'Y-m-d'));
+        var csv = Rally.technicalservices.FileUtilities.getCSVFromGrid(this._getGrid());
+        this.logger.log('_exportData', filename, csv);
+        Rally.technicalservices.FileUtilities.saveCSVToFile(csv,filename);
     }
+
 });
