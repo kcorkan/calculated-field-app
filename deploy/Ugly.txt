@@ -3,10 +3,10 @@
 <head>
     <title>calculated-field-app</title>
     <!--  (c) 2013 Rally Software Development Corp.  All Rights Reserved. -->
-    <!--  Build Date: Wed Nov 05 2014 13:43:29 GMT-0800 (PST) -->
+    <!--  Build Date: Thu Mar 12 2015 17:07:13 GMT-0700 (PDT) -->
     
     <script type="text/javascript">
-        var APP_BUILD_DATE = "Wed Nov 05 2014 13:43:29 GMT-0800 (PST)";
+        var APP_BUILD_DATE = "Thu Mar 12 2015 17:07:13 GMT-0700 (PDT)";
         var CHECKSUM = [%= checksum %];
     </script>
     

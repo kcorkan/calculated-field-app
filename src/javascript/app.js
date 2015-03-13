@@ -4,14 +4,14 @@ Ext.define('CustomApp', {
     logger: new Rally.technicalservices.Logger(),
     items: [
         {xtype:'container',itemId:'message_box',tpl:'Hello, <tpl>{_refObjectName}</tpl>'},
-        {xtype:'container',itemId:'control_box',layout:{type:'vbox'}},
+        {xtype:'container',itemId:'control_box',layout:{type:'hbox'}},
         {xtype:'container',itemId:'button_box',layout:{type:'hbox'}},
         {xtype:'container',itemId:'display_box'},
         {xtype:'tsinfolink'}
     ],
     invalidDateString: 'Invalid Date',
     dateFormat: 'MM/dd/YYYY',
-    lookbackFetchFields: ['_PreviousValues.Blocked','_SnapshotNumber','Name','FormattedID','_ProjectHierarchy','Feature','_TypeHierarchy','Blocked','_ValidFrom','_ValidTo','BlockedReason','c_BlockerOwnerFirstLast','c_BlockerCategory','c_BlockerCreationDate','DirectChildrenCount','Feature'],
+    lookbackFetchFields: ['_PreviousValues.Blocked','_SnapshotNumber','Name','FormattedID','_ProjectHierarchy','Feature','_TypeHierarchy','Blocked','_ValidFrom','_ValidTo','BlockedReason','c_BlockerOwnerFirstLast','c_BlockerCategory','c_BlockerCreationDate','DirectChildrenCount','Feature','Iteration'],
     featureHash: {},
     launch: function() {
     	
@@ -19,116 +19,84 @@ Ext.define('CustomApp', {
     	this.down('#control_box').add({
     		xtype: 'rallydatefield',
     		itemId: 'from-date-picker',
-    		fieldLabel: 'Date From:'
+    		margin: 10,
+    		fieldLabel: 'Date From:',
+            labelAlign: 'right'
     	});
     	
     	this.down('#control_box').add({
     		xtype: 'rallycheckboxfield',
     		itemId: 'show-blocked-checkbox',
     		fieldLabel: 'Show only Blocked Items:',
+    		labelWidth: 150,
+    		labelAlign: 'right',
+            margin: 10,
     		value: false
     	});
     	
-    	this.down('#button_box').add({
+    	this.down('#control_box').add({
     		xtype: 'rallybutton',
     		itemId: 'run-button',
     		text: 'Run',
+            margin: 10,
     		scope:this,
     		handler: this._buildGrid,
-    		disabled: true
+    		//disabled: true
     	});
-    	this.down('#button_box').add({
+    	this.down('#control_box').add({
     		xtype: 'rallybutton',
     		itemId: 'export-button',
     		text: 'Export',
+            margin: 10,
     		scope: this,
     		handler: this._exportData,
     		//disabled: true
     	});
-    	
-    	var promises = [];
-        promises.push(this._fetchProjects());
-        promises.push(this._fetchFeatureHash());
-        Deft.Promise.all(promises).then({
-    		scope: this,
-    		success: function(){
-    			this.down('#run-button').setDisabled(false);
-    		}
-    	});
-
-           
     },
     _buildGrid: function(){
         var current_project_id  = this.getContext().getProject().ObjectID;
-    	var promises = [];
-        promises.push(this._fetchLookbackStore(current_project_id));
-       // promises.push(this._fetchLookbackStore2(current_project_id));
-        Deft.Promise.all(promises).then({
-  	        scope: this,
-  	        success: function(items){
-  	            this._renderGrid(items);
-  	        },
-  	        failure: function(error_msg) { alert(error_msg); }
-  	    });
+        var fromDate = this.down('#from-date-picker').getValue();
+        
+        this.setLoading(true);
+    	this._fetchLookbackStore(current_project_id, fromDate).then({
+    	    scope: this,
+    	    success: this._calculateAgingForBlockers
+    	});
     },
-    _fetchLookbackStore: function(current_project_id){
+    _fetchLookbackStore: function(currentProjectId, fromDate){
         var deferred = Ext.create('Deft.Deferred');
-    	var me = this; 
-        me.logger.log('_fetchLookbackStore start');
+        
+        var find = {};  
+        if (fromDate == undefined){
+            fromDate = new Date();
+            find["Blocked"] = true;  
+        } else {
+            find["$or"] = [{"_PreviousValues.Blocked":true},{"Blocked": true}];
+        }
+        var isoFromDate = Rally.util.DateTime.toIsoString(fromDate);
+
+        find["_TypeHierarchy"] = 'HierarchicalRequirement';
+        find["_ProjectHierarchy"] = currentProjectId;  
+        find["_ValidTo"] = {$gte: isoFromDate};
+        
     	Ext.create('Rally.data.lookback.SnapshotStore', {
             scope: this,
             listeners: {
                 scope: this,
                 load: function(store, data, success){
-                    me.logger.log('fetchLookbackStore returned data',data);
-                    deferred.resolve(data);
+                    this.logger.log('fetchLookbackStore load',data.length, success);
+                    var snaps_by_oid = Rally.technicalservices.Toolbox.aggregateSnapsByOidForModel(data);
+                    deferred.resolve(snaps_by_oid);
                 }
             },
             autoLoad: true,
             fetch: this.lookbackFetchFields, 
-            find: {
-            	'_PreviousValues.Blocked': {$ne: null},
-            	'_TypeHierarchy': 'HierarchicalRequirement',
-            	'_ProjectHierarchy':current_project_id
-            },
-          sort: {'_ValidFrom': 1}
+            hydrate: ["Iteration","Project"],
+            find: find,
+            sort: {'_ValidFrom': 1}
        });         
-    	return deferred.promise;
-    	
+       return deferred.promise;
     },
-//    _fetchLookbackStore2: function(current_project_id){
-//    	var deferred = Ext.create('Deft.Deferred');
-//        var me = this; 
-//        me.logger.log('_fetchLookbackStore start');
-//    	Ext.create('Rally.data.lookback.SnapshotStore', {
-//            scope: this,
-//            listeners: {
-//                scope: this,
-//                load: function(store, data, success){
-//                    me.logger.log('fetchLookbackStore returned data',data);
-//                    deferred.resolve(data);
-//                }
-//            },
-//            autoLoad: true,
-//            fetch: this.lookbackFetchFields, 
-//            filters: [{
-//                      property: '_TypeHierarchy',
-//                      operator: 'in',
-//                      value: ['HierarchicalRequirement']
-//            },{
-//				property: '_PreviousValues.Blocked',
-//				value: true
-//			},{
-//				property: 'Blocked',
-//				value: false
-//			},{
-//            	property: '_ProjectHierarchy',
-//            	value: current_project_id
-//            }],
-//            sort: {"_ValidFrom": 1}
-//       });    
-//    	return deferred.promise;
-//    },
     _fetchFeatureHash: function(){
     	var deferred = Ext.create('Deft.Deferred');
         var me = this; 
@@ -140,15 +108,9 @@ Ext.define('CustomApp', {
                 load: function(store, data, success){
                     me.logger.log('_fetchFeatureHash returned data',data);
                     Ext.each(data, function(d){
-                    	var feat = {};
-
-                    	feat['Name'] = d.get('Name');
-                    	feat['FormattedID'] = d.get('FormattedID');
-                    	var key = d.get('ObjectID').toString();
-                    	console.log(key,feat);
-                    	this.featureHash[key] = feat;
+                        var key = d.get('ObjectID').toString();
+                        this.featureHash[key] = d.getData();
                     }, this);
-
                     deferred.resolve(data);
                 }
             },
@@ -159,144 +121,80 @@ Ext.define('CustomApp', {
                 "__At": "current"
             },
        });    
-    	return deferred.promise;
-    	
+       return deferred.promise;
+    
     },
-    _renderGrid: function(datas){
-    	this.logger.log('_renderGrid');
-        var columns = [
-           	        {
-        	            text: 'FormattedID', dataIndex: 'FormattedID'
-        	        },{
-        	            text: 'Name', dataIndex: 'Name'
-           	        },{
-        	            text: 'Project', dataIndex: 'Project'
-           	        },{
-        	            text: 'StartDate', dataIndex: 'StartDate'
-           	        },{
-        	            text: 'EndDate', dataIndex: 'EndDate'
-           	        },{
-           	        	text:'Blocker Reason', dataIndex: 'BlockerReason'
-           	        },{
-           	        	text:'Blocker Category', dataIndex: 'BlockerCategory'
-           	        },{
-           	        	text:'Blocker Owner', dataIndex: 'BlockerOwner'
-           	        },{
-           	        	text:'Blocker Creation Date', dataIndex: 'BlockerCreationDate'
-           	        },{
-           	        	text:'Feature Name', dataIndex: 'FeatureName'
-           	        },{
-           	        	text:'Feature FormattedID', dataIndex: 'FeatureFormattedID'
-           	        },{
-        	            text: 'Blocked', dataIndex: 'Blocked'
-           	        },{
-        	            text: 'Age', dataIndex: 'Age'
-           	        }
-           	        
-           	        
-           	        ]
-    	
-        var data_array = this._convertToCustomStore(datas);
+    _renderGrid: function(data){
+        var columns = [{text: 'FormattedID', dataIndex: 'FormattedID'},
+                       {text: 'Name', dataIndex: 'Name'},
+                       {text: 'Project', dataIndex: 'Project', renderer: this._objectNameRenderer},
+                       {text: 'Feature', dataIndex: 'Feature', renderer: this._featureOidRenderer},
+                       {text: 'Blocked', dataIndex: 'Blocked'},
+                       {text: 'Total Blocked Time (Days)', dataIndex: 'totalBlocked'},
+                       {text: 'Average Resolution Time (Days)', dataIndex: 'averageResolutionTime'},
+                       {text: '#Durations', dataIndex: 'numDurations'},
+                       {text: 'Iteration Blocked In', dataIndex: 'startValue', renderer: this._objectNameRenderer},
+                       {text: 'Current Iteration', dataIndex: 'currentValue', renderer: this._objectNameRenderer}]
+
+        if (this.down('#data-grid')){
+            this.down('#data-grid').destroy();
+        }
         
-    	var grid = Ext.create('Rally.ui.grid.Grid', {
-    	    itemId: 'data-grid',
-    		store: Ext.create('Rally.data.custom.Store', {
-    	        data: data_array,
-    	        autoLoad: true
-    	    }),
-    	    columnCfgs: columns
-    	});
-    	this.down('#display_box').add(grid);
+        var grid = Ext.create('Rally.ui.grid.Grid', {
+            itemId: 'data-grid',
+            store: Ext.create('Rally.data.custom.Store', {
+                data: data,
+                autoLoad: true
+            }),
+            columnCfgs: columns
+        });
+        this.down('#display_box').add(grid);
+        this.setLoading(false);
+    },
+    _featureOidRenderer: function(v,m,r){
+        if (v && typeof v == 'object'){
+            return Ext.String.format('{0}: {1}', v.FormattedID, v.Name);
+        }
+        return v; 
+    },
+    _objectNameRenderer: function(v,m,r){
+        if (v && typeof v == 'object'){
+            return v.Name;
+        }
+        return v;
+    },
 
+    _calculateAgingForBlockers: function(snapsByOid){
+        this.logger.log('_calculateAgingForBlockers',snapsByOid);
+        var desiredFields = ['FormattedID','Name','Feature','Project','BlockedReason','Blocked'];
+        var data = [];
+        
+        Ext.Object.each(snapsByOid, function(oid, snaps){
+            var fieldObj = AgingCalculator.getFieldHash(snaps, desiredFields);
+            var agingObj = AgingCalculator.calculateDurations(snaps,"Blocked",true);
+            var mobilityObj = AgingCalculator.calculateMobility(snaps,"_PreviousValues.Blocked","Blocked",true,"Iteration");
+            var record = _.extend(fieldObj, mobilityObj);
+            
+            this.logger.log(fieldObj,agingObj,mobilityObj);
+            record["numDurations"] = agingObj.durations.length;
+            record["averageResolutionTime"] = '';
+            if (agingObj.durations.length > 0){
+                record["totalBlocked"] = Ext.Array.sum(agingObj.durations);
+                var mean_array = agingObj.durations;  
+                if (record["Blocked"]){
+                    mean_array = agingObj.durations.slice(0,-1);
+                } 
+                if (mean_array.length > 0){
+                    record["averageResolutionTime"] = Ext.Array.mean(mean_array);
+                }
+                data.push(record);
+            }
+            
+        },this);
+        this.logger.log('_calculateAgingForBlockers',data);
+        this._renderGrid(data);
     },
-    _fetchProjects: function(){
-    	this.logger.log('_fetchProjects');
-    	var deferred = Ext.create('Deft.Deferred');
-    	Ext.create('Rally.data.wsapi.Store', {
-    	    model: 'Project',
-    	    fetch: ['ObjectID','Name'],
-	    	autoLoad: true,
-    	    listeners: {
-    	    	scope: this, 
-    	        load: function(store, data, success) {
-    	            this.logger.log('_fetchProjects.load',success);
-    	        	if (success) {
-        	        	var project_hash = {};
-        	        	Ext.each(data, function(d){
-        	            	project_hash[d.get('ObjectID').toString()] = d.get('Name');
-        	            });
-            			this.projectHash = project_hash;
-        	            deferred.resolve(project_hash);
-    	            } else {
-    	            	deferred.reject('Failed to build project mapping.');
-    	            }
-    	        }
-    	    }
-    	});   	
-    	return deferred;
-    },
-    _convertToCustomStore:function(datas){
-    	this.logger.log('_convertToCustomStore',datas);
-    	
-    	var data_hash = {};
-   	Ext.each(datas, function(data){
 
-    		Ext.each(data, function(rec){
-        		var formatted_id = rec.get('FormattedID');
-        		//	console.log(formatted_id, rec.get('_SnapshotNumber'),rec.get('_PreviousValues.Blocked'),rec.get('_ValidFrom'));        			
-        	
-        		if (!data_hash[formatted_id]){
-        			data_hash[formatted_id] = {};
-        			data_hash[formatted_id]['StartDate'] = this._formatDate(rec.get('_ValidFrom')); //new Date(rec.get('_ValidFrom'));
-        			data_hash[formatted_id]['EndDate'] = this._formatDate(new Date()); //new Date(rec.get('_ValidFrom'));
-    		    }
-    			data_hash[formatted_id]['FormattedID'] = formatted_id;
-        		data_hash[formatted_id]['Name'] = rec.get('Name');
-        		data_hash[formatted_id]['Project'] = this.projectHash[rec.get('Project').toString()];
-        		data_hash[formatted_id]['Blocked'] = rec.get('Blocked');
-        		data_hash[formatted_id]['BlockerReason'] = rec.get('BlockedReason');
-        		data_hash[formatted_id]['BlockerCategory'] = rec.get('c_BlockerCategory');
-        		data_hash[formatted_id]['BlockerCreationDate'] = rec.get('c_BlockerCreationDate');
-        		data_hash[formatted_id]['BlockerOwner'] = rec.get('c_BlockerOwnerFirstLast');
-        		var feature = this.featureHash[rec.get('Feature').toString()];
-        		var feature_name = '';
-        		var feature_id = '';
-        		if (feature){
-            		feature_name =  feature.Name;
-            		feature_id = feature.FormattedID;
-        		}
-        		data_hash[formatted_id]['FeatureName'] = feature_name;  
-        		data_hash[formatted_id]['FeatureFormattedID'] = feature_id;
-        		data_hash[formatted_id]['DirectChildrenCount'] = rec.get('DirectChildrenCount');
-        		
-         		if (rec.get('_PreviousValues.Blocked')){
-        			data_hash[formatted_id]['EndDate'] = this._formatDate(rec.get('_ValidFrom'));
-        		} else {
-        			data_hash[formatted_id]['StartDate'] = this._formatDate(rec.get('_ValidFrom'));
-        		}
-         		
-        	},this);
-    	},this);
-
-        	var data = [];
-        	Object.keys(data_hash).forEach(function (key) { 
-        		var end_date = new Date(data_hash[key]['EndDate']);
-        		var start_date = new Date(data_hash[key]['StartDate']);
-        	    var ms = Ext.Date.getElapsed(end_date,start_date);
-        	    var days = Math.round(ms/1000/60/60/24);
-        		data_hash[key]['Age']=days;
-        		data.push(data_hash[key]);
-        	});
-        	this._exportData(data);
-        	return data;
-    },
-    _formatDate: function(date_string){
-    	if (Date.parse(date_string) > 0){
-        	var date = new Date(date_string);
-        	return Ext.String.format("{0}/{1}/{2}",date.getMonth()+1,date.getDate(),date.getFullYear());
-    	}
-    	return this.invalidDateString;
-    },
     _exportData: function(data){
      	var keys = Object.keys(data[0]);
      	var text = keys.join(',') + '\n';
