@@ -48,6 +48,7 @@ Ext.define('CustomApp', {
             text: 'Run',
             margin: 10,
             scope:this,
+            width: 75,
             handler: this._run,
         });
 
@@ -57,6 +58,7 @@ Ext.define('CustomApp', {
              text: 'Export',
              margin: 10,
              scope: this,
+             width: 75,
              handler: this._exportData,
          });
     },
