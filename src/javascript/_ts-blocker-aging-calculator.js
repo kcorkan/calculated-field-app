@@ -37,27 +37,30 @@ Ext.define('AgingCalculator',{
         }
         return {startValue: startValue, currentValue: currentValue}
     },
-    calculateDurations: function(snapsForOid, currentField, fieldValue){
+    calculateDurations: function(snapsForOid, currentField, fieldValue, blockedAfterDate){
         var granularity = "second";
         var conversionDivisor = 86400;
         var ages = [];
         var earliestStartDate = null;  
         var lastEndDate = null; 
-       
+        
         if (snapsForOid.length > 0) {
             var startDate = null;
             var endDate = Rally.util.DateTime.fromIsoString(snapsForOid[0]._ValidFrom);
+            if (blockedAfterDate == undefined || blockedAfterDate == null){
+                blockedAfterDate = Rally.util.DateTime.fromIsoString(snapsForOid[0]._ValidFrom);
+            }
             
             var previousValue = snapsForOid[0][currentField];
             var previousValueField = "_PreviousValues." + currentField;
             if (snapsForOid[0][previousValueField] != undefined){
                 previousValue = snapsForOid[0][previousValueField];
             }
-
+            var isCurrent = false; 
             Ext.each(snapsForOid, function(snap){
                 if (snap[currentField] != previousValue){
                     var date = Rally.util.DateTime.fromIsoString(snap._ValidFrom);
-                    if (snap[currentField] === fieldValue){
+                    if (snap[currentField] === fieldValue && date >= blockedAfterDate){
                             startDate = date;
                             if (earliestStartDate == null){
                                 earliestStartDate = date; 
@@ -70,8 +73,12 @@ Ext.define('AgingCalculator',{
                     }
                 } 
                 previousValue = snap[currentField];
+                if (Rally.util.DateTime.fromIsoString(snap._ValidTo) > new Date()){
+                    isCurrent = true;  
+                }
             },this);
-            if (startDate != null){
+            
+            if (startDate != null && isCurrent){
                 ages.push(Rally.util.DateTime.getDifference(new Date(),startDate,granularity)/conversionDivisor);
             }
         }
